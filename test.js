@@ -1,0 +1,23 @@
+'use strict';
+const assert=require('node:assert/strict'),C=require('./model.js');
+let tests=0;function test(name,fn){fn();tests++;console.log('✓ '+name);}
+function rich(){let s=C.create();for(let r of C.RES)s.res[r]=10000;return s;}
+function add(s,t,x,y=0){let v=C.build(s,t,x,y);assert.equal(v.error,undefined,v.error);return v.building;}
+test('Costes reales, ocupación, soporte y límites',()=>{let s=C.create(),before=s.res.wood;add(s,'house',0);assert.equal(s.res.wood,before-20);assert.match(C.reason(s,'farm',0,0),/ocupado/);assert.match(C.reason(s,'house',4,1),/soporte/);assert.match(C.reason(s,'house',16,0),/Explora/);assert.match(C.reason(s,'house',0,19),/límites/);s.res.wood=0;assert.match(C.reason(s,'house',2,0),/insuficientes/);});
+test('Pisos conectados, empleos, producción y desmontaje seguro',()=>{let s=rich();let h=add(s,'house',0),f=add(s,'farm',0,1);assert(!C.connections(s).has(f.id));assert.match(C.assign(s,f,1),/Conecta/);let base=add(s,'stairs',2),up=add(s,'stairs',2,1);assert(C.connections(s).has(f.id));assert.equal(C.assign(s,f,1),'');let food=s.res.food;s.res.food=100;C.tick(s,1);assert(s.res.food>100);assert.match(C.demolish(s,h),/apoyado/);assert.match(C.demolish(s,up),/conexión/);assert.equal(C.demolish(s,f),'');assert.equal(C.free(s),8);});
+test('Límites de personal y almacén',()=>{let s=rich(),b=add(s,'farm',0);assert.equal(C.assign(s,b,1),'');assert.equal(C.assign(s,b,1),'');assert.match(C.assign(s,b,1),/ocupados/);C.tick(s,1);assert(s.res.food<=250);add(s,'warehouse',2);assert.equal(C.capacity(s),500);});
+test('Energía, averías y tecnologías',()=>{let s=rich(),b=add(s,'lab',0);C.assign(s,b,1);s.res.energy=0;C.tick(s,1);assert.equal(s.science,0);s.res.energy=100;b.broken=true;C.tick(s,1);assert.equal(s.science,0);b.broken=false;C.tick(s,1);assert(s.science>0);assert.match(C.research(s,'signal'),/Requiere/);s.science=400;assert.equal(C.research(s,'engineering'),'');assert.equal(C.research(s,'signal'),'');assert.equal(C.research(s,'signal'),'Ya está investigada.');});
+test('Expansión exige tecnología y recursos; abre terreno nuevo',()=>{let s=rich();assert.match(C.explore(s),/Investiga/);s.tech.push('engineering');let before=s.res.wood;assert.equal(C.explore(s),'');assert.equal(s.res.wood,before-50);add(s,'house',20);assert.equal(C.explore(s),'');assert.match(C.explore(s),/Todas/);});
+test('Escasez reduce felicidad y frena inmigración sin eliminar habitantes',()=>{let s=C.create();s.res.food=0;for(let i=0;i<120;i++)C.tick(s,1);assert.equal(s.pop,8);assert(s.happy<63);assert(s.res.food>=0);});
+// A real economy from the starting budget: no injected resources or population.
+test('Partida completa: construir → producir → investigar → expandir → 50 colonos → antena',()=>{
+ let s=C.create();const advance=(seconds)=>{for(let i=0;i<seconds*10;i++){C.tick(s,.1);for(let b of s.buildings)if(b.broken&&C.canPay(s,{stone:5,metal:3})){C.pay(s,{stone:5,metal:3});b.broken=false;}}};
+ const wait=(pred,limit=1800)=>{for(let i=0;i<limit;i++){if(pred())return;advance(1);}throw Error('Objetivo no alcanzado: '+JSON.stringify({pop:s.pop,res:s.res,science:s.science,happy:s.happy}));};
+ const construct=(t,x,y=0)=>{wait(()=>C.canPay(s,C.DEFS[t].cost));return add(s,t,x,y);};const staff=(b,n=2)=>{for(let i=0;i<n;i++)assert.equal(C.assign(s,b,1),'');};
+ construct('house',0);construct('house',2);staff(construct('farm',4));staff(construct('lumber',6));staff(construct('quarry',8));staff(construct('generator',10));construct('warehouse',12);construct('stairs',14);construct('stairs',14,1);
+ construct('house',0,1);construct('house',2,1);wait(()=>C.free(s)>=2);staff(construct('lab',12,1));construct('farm',4,1);construct('lumber',6,1);construct('quarry',8,1);construct('generator',10,1);
+ wait(()=>s.science>=100);assert.equal(C.research(s,'engineering'),'');wait(()=>C.canPay(s,{wood:50,stone:40,metal:25,energy:30}));assert.equal(C.explore(s),'');
+ for(let y=2;y<=4;y++){construct('stairs',14,y);construct('house',0,y);construct('house',2,y);construct('farm',4,y);construct('recreation',6,y);construct('warehouse',8,y);construct('house',10,y);construct('house',12,y);for(let b of s.buildings.filter(b=>b.type==='farm'&&b.workers<2)){while(b.workers<2&&C.free(s)>0)C.assign(s,b,1);}for(let b of s.buildings.filter(b=>b.type==='recreation'&&b.workers<2)){while(b.workers<2&&C.free(s)>0)C.assign(s,b,1);}}
+ wait(()=>s.pop>=50);wait(()=>s.science>=180);assert.equal(C.research(s,'signal'),'');construct('antenna',20);advance(2);assert(s.won);assert(s.islands>=2);assert(s.buildings.some(b=>b.y>=4));console.log('  Victoria en '+Math.round(s.time)+' s de simulación, '+s.pop+' habitantes.');
+});
+console.log(tests+' pruebas correctas.');
